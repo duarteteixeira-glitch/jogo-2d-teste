@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini GTA Retrô</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #222;
+            color: white;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            border: 4px solid #fff;
+            background-color: #555; /* Cor do asfalto */
+        }
+        #hud {
+            margin-bottom: 10px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="hud">Status: A pé | Controles: Setas (Mover) - 'E' (Entrar/Sair do Carro)</div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const hud = document.getElementById("hud");
+
+        // Estado do jogo
+        let keys = {};
+        
+        // Jogador
+        let player = {
+            x: 100,
+            y: 300,
+            size: 20,
+            color: "#00ff00",
+            speed: 3,
+            inVehicle: false
+        };
+
+        // Carro
+        let car = {
+            x: 400,
+            y: 300,
+            width: 50,
+            height: 30,
+            color: "#ff0000",
+            speed: 0,
+            maxSpeed: 6,
+            angle: 0,
+            friction: 0.95,
+            turnSpeed: 0.05
+        };
+
+        // Prédios (Obstáculos)
+        const buildings = [
+            { x: 200, y: 100, width: 150, height: 150 },
+            { x: 500, y: 100, width: 150, height: 150 },
+            { x: 350, y: 400, width: 120, height: 150 }
+        ];
+
+        // Ouvintes de teclado
+        window.addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
+        window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
+
+        // Lógica de entrar/sair do carro (Tecla E)
+        window.addEventListener("keydown", (e) => {
+            if (e.key.toLowerCase() === 'e') {
+                if (player.inVehicle) {
+                    // Sair do carro
+                    player.inVehicle = false;
+                    player.x = car.x - 40; // Cospe o jogador para o lado
+                    player.y = car.y;
+                    hud.innerText = "Status: A pé | Controles: Setas (Mover) - 'E' (Entrar/Sair)";
+                } else {
+                    // Verificar distância para entrar no carro
+                    let dist = Math.hypot(player.x - car.x, player.y - car.y);
+                    if (dist < 50) {
+                        player.inVehicle = true;
+                        hud.innerText = "Status: Dirigindo | Controles: Setas (Acelerar/Virar) - 'E' (Sair)";
+                    }
+                }
+            }
+        });
+
+        // Checar colisão com prédios
+        function checkBuildingCollision(x, y, size) {
+            for (let b of buildings) {
+                if (x < b.x + b.width && x + size > b.x && y < b.y + b.height && y + size > b.y) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Atualizar física e posições
+        function update() {
+            if (!player.inVehicle) {
+                // Movimento do jogador a pé
+                let nextX = player.x;
+                let nextY = player.y;
+
+                if (keys["arrowup"]) nextY -= player.speed;
+                if (keys["arrowdown"]) nextY += player.speed;
+                if (keys["arrowleft"]) nextX -= player.speed;
+                if (keys["arrowright"]) nextX += player.speed;
+
+                if (!checkBuildingCollision(nextX, player.y, player.size)) player.x = nextX;
+                if (!checkBuildingCollision(player.x, nextY, player.size)) player.y = nextY;
+
+            } else {
+                // Movimento do carro (física de rotação)
+                if (keys["arrowup"]) {
+                    if (car.speed < car.maxSpeed) car.speed += 0.2;
+                } else if (keys["arrowdown"]) {
+                    if (car.speed > -car.maxSpeed / 2) car.speed -= 0.2;
+                } else {
+                    car.speed *= car.friction; // Desaceleração natural
+                }
+
+                if (keys["arrowleft"] && Math.abs(car.speed) > 0.5) car.angle -= car.turnSpeed;
+                if (keys["arrowright"] && Math.abs(car.speed) > 0.5) car.angle += car.turnSpeed;
+
+                // Calcular próxima posição do carro baseado no ângulo
+                let nextCarX = car.x + Math.cos(car.angle) * car.speed;
+                let nextCarY = car.y + Math.sin(car.angle) * car.speed;
+
+                // Colisão simples do carro com as bordas e prédios (reseta a velocidade se bater)
+                if (!checkBuildingCollision(nextCarX - car.width/2, nextCarY - car.height/2, car.width)) {
+                    car.x = nextCarX;
+                    car.y = nextCarY;
+                } else {
+                    car.speed = -car.speed * 0.4; // Rebate de leve
+                }
+
+                // Prender o jogador dentro do carro
+                player.x = car.x;
+                player.y = car.y;
+            }
+
+            // Limites da tela
+            player.x = Math.max(0, Math.min(canvas.width - player.size, player.x));
+            player.y = Math.max(0, Math.min(canvas.height - player.size, player.y));
+        }
+
+        // Desenhar tudo na tela
+        function draw() {
+            // Limpar tela
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Desenhar Prédios
+            ctx.fillStyle = "#333";
+            buildings.forEach(b => {
+                ctx.fillRect(b.x, b.y, b.width, b.height);
+                ctx.strokeStyle = "#444";
+                ctx.lineWidth = 4;
+                ctx.strokeRect(b.x, b.y, b.width, b.height);
+            });
+
+            // Desenhar Carro
+            ctx.save();
+            ctx.translate(car.x, car.y);
+            ctx.rotate(car.angle);
+            ctx.fillStyle = car.color;
+            // Desenha o corpo do carro centralizado
+            ctx.fillRect(-car.width / 2, -car.height / 2, car.width, car.height);
+            // Faróis para saber a frente
+            ctx.fillStyle = "yellow";
+            ctx.fillRect(car.width / 2 - 5, -car.height / 2 + 2, 5, 5);
+            ctx.fillRect(car.width / 2 - 5, car.height / 2 - 7, 5, 5);
+            ctx.restore();
+
+            // Desenhar Jogador (só aparece se estiver a pé)
+            if (!player.inVehicle) {
+                ctx.fillStyle = player.color;
+                ctx.fillRect(player.x, player.y, player.size, player.size);
+            }
+        }
+
+        // Loop principal do jogo
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Iniciar o jogo
+        gameLoop();
+    </script>
+</body>
+</html>
