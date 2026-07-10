@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jogo de Tiro Espacial</title>
+    <title>Labirinto Sombrio</title>
     <style>
         * {
             margin: 0;
@@ -11,9 +11,9 @@
             box-sizing: border-box;
         }
         body {
-            background-color: #111;
-            color: white;
-            font-family: sans-serif;
+            background-color: #050505;
+            color: #aaa;
+            font-family: 'Courier New', Courier, monospace;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -21,164 +21,194 @@
             height: 100vh;
             overflow: hidden;
         }
+        #canvasContainer {
+            position: relative;
+        }
         canvas {
-            border: 4px solid #333;
-            background-color: #050510;
+            border: 2px solid #222;
+            background-color: #000;
+            cursor: none;
         }
         #hud {
+            margin-bottom: 15px;
+            font-size: 16px;
+            text-align: center;
+            max-width: 600px;
+        }
+        #btnAudio {
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 8px 16px;
+            cursor: pointer;
             margin-bottom: 10px;
-            font-size: 20px;
-            font-weight: bold;
+        }
+        #btnAudio:hover {
+            background: #333;
         }
     </style>
 </head>
 <body>
 
-    <div id="hud">Pontuação: 0</div>
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <button id="btnAudio">Clique aqui para Ativar a Música de Suspense</button>
+    <div id="hud">Explore o local escuro usando as setas. Encontre a saída se puder.</div>
+    <div id="canvasContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+    </div>
 
     <script>
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
         const hud = document.getElementById("hud");
+        const btnAudio = document.getElementById("btnAudio");
 
-        let score = 0;
-        let gameOver = false;
         let keys = {};
+        let audioCtx = null;
+        let gameStarted = false;
 
-        // Jogador (Nave)
+        // Jogador (Explorador)
         const player = {
-            x: canvas.width / 2 - 20,
-            y: canvas.height - 60,
-            width: 40,
-            height: 40,
-            speed: 6,
-            cooldown: 0
+            x: 50,
+            y: 50,
+            size: 15,
+            speed: 2.5
         };
 
-        // Listas de objetos
-        let bullets = [];
-        let enemies = [];
+        // Paredes do labirinto escuro
+        const walls = [
+            { x: 0, y: 0, w: 800, h: 20 },
+            { x: 0, y: 0, w: 20, h: 600 },
+            { x: 780, y: 0, w: 20, h: 600 },
+            { x: 0, y: 580, w: 800, h: 20 },
+            // Barreiras internas
+            { x: 150, y: 20, w: 30, h: 400 },
+            { x: 150, y: 420, w: 400, h: 30 },
+            { x: 350, y: 150, w: 30, h: 200 },
+            { x: 500, y: 20, w: 30, h: 300 },
+            { x: 650, y: 200, w: 30, h: 380 }
+        ];
 
-        // Controles
-        window.addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
-        window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
+        // Ponto de Saída
+        const escapePoint = { x: 730, y: 50, w: 30, h: 300 };
 
-        // Criar inimigos aleatórios
-        function spawnEnemy() {
-            if (gameOver) return;
-            const size = Math.random() * 30 + 20;
-            enemies.push({
-                x: Math.random() * (canvas.width - size),
-                y: -size,
-                width: size,
-                height: size,
-                speed: Math.random() * 2 + 2
-            });
-            // Agenda o próximo inimigo
-            setTimeout(spawnEnemy, Math.random() * 1000 + 500);
-        }
+        // Controles de movimento
+        window.addEventListener("keydown", (e) => keys[e.key] = true);
+        window.addEventListener("keyup", (e) => keys[e.key] = false);
 
-        // Detectar colisão entre dois retângulos
-        function rectCollision(rect1, rect2) {
-            return rect1.x < rect2.x + rect2.width &&
-                   rect1.x + rect1.width > rect2.x &&
-                   rect1.y < rect2.y + rect2.height &&
-                   rect1.y + rect1.height > rect2.y;
-        }
-
-        // Atualizar lógica do jogo
-        function update() {
-            if (gameOver) return;
-
-            // Movimento do jogador
-            if (keys["arrowleft"] || keys["a"]) player.x -= player.speed;
-            if (keys["arrowright"] || keys["d"]) player.x += player.speed;
-
-            // Limites da tela para o jogador
-            player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
-
-            // Sistema de Tiro (Barra de espaço)
-            if (player.cooldown > 0) player.cooldown--;
-            if ((keys[" "] || keys["spacebar"]) && player.cooldown === 0) {
-                bullets.push({
-                    x: player.x + player.width / 2 - 4,
-                    y: player.y,
-                    width: 8,
-                    height: 15,
-                    speed: 8
-                });
-                player.cooldown = 15; // Tempo entre um tiro e outro
+        // Ativação da música gerada por código (Sintetizador Web Audio API)
+        btnAudio.addEventListener("click", () => {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                startSuspenseMusic();
+                btnAudio.style.display = "none";
+                gameStarted = true;
             }
+        });
 
-            // Atualizar tiros
-            bullets.forEach((bullet, index) => {
-                bullet.y -= bullet.speed;
-                // Remover tiros que saem da tela
-                if (bullet.y < 0) bullets.splice(index, 1);
-            });
-
-            // Atualizar inimigos
-            enemies.forEach((enemy, eIndex) => {
-                enemy.y += enemy.speed;
-
-                // Game Over se o inimigo tocar o chão ou bater no jogador
-                if (enemy.y > canvas.height || rectCollision(player, enemy)) {
-                    gameOver = true;
-                }
-
-                // Checar se algum tiro acertou o inimigo
-                bullets.forEach((bullet, bIndex) => {
-                    if (rectCollision(bullet, enemy)) {
-                        enemies.splice(eIndex, 1);
-                        bullets.splice(bIndex, 1);
-                        score += 10;
-                        hud.innerText = "Pontuação: " + score;
-                    }
-                });
-            });
+        // Função que gera notas graves e contínuas para criar tensão
+        function startSuspenseMusic() {
+            setInterval(() => {
+                if (!audioCtx) return;
+                
+                let osc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                
+                osc.type = 'sawtooth';
+                // Notas muito graves alternando para dar sensação de desconforto
+                osc.frequency.setValueAtTime(Math.random() > 0.5 ? 55 : 48.99, audioCtx.currentTime); 
+                
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.8);
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.start();
+                osc.stop(audioCtx.currentTime + 1.8);
+            }, 1500);
         }
 
-        // Desenhar elementos na tela
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Checar colisão com as paredes
+        function checkWallCollision(x, y) {
+            for (let wall of walls) {
+                if (x < wall.x + wall.w && x + player.size > wall.x &&
+                    y < wall.y + wall.h && y + player.size > wall.y) {
+                    return true;
+                }
+            }
+            return false;
+        }
 
-            if (gameOver) {
-                ctx.fillStyle = "white";
-                ctx.font = "40px sans-serif";
+        // Lógica de atualização do jogo
+        function update() {
+            if (!gameStarted) return;
+
+            let nextX = player.x;
+            let nextY = player.y;
+
+            if (keys["ArrowUp"] || keys["w"]) nextY -= player.speed;
+            if (keys["ArrowDown"] || keys["s"]) nextY += player.speed;
+            if (keys["ArrowLeft"] || keys["a"]) nextX -= player.speed;
+            if (keys["ArrowRight"] || keys["d"]) nextX += player.speed;
+
+            if (!checkWallCollision(nextX, player.y)) player.x = nextX;
+            if (!checkWallCollision(player.x, nextY)) player.y = nextY;
+
+            // Condição de vitória (Alcançar a área de saída)
+            if (player.x < escapePoint.x + escapePoint.w && player.x + player.size > escapePoint.x &&
+                player.y < escapePoint.y + escapePoint.h && player.y + player.size > escapePoint.y) {
+                hud.innerHTML = "<span style='color: #00ff00; font-weight: bold;'>Você encontrou a saída... por enquanto.</span>";
+                gameStarted = false;
+            }
+        }
+
+        // Renderização dos gráficos em ambiente escuro
+        function draw() {
+            // Limpa a tela com preto absoluto
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (!gameStarted) {
+                ctx.fillStyle = "#444";
+                ctx.font = "20px Courier New";
                 ctx.textAlign = "center";
-                ctx.fillText("FIM DE JOGO", canvas.width / 2, canvas.height / 2);
-                ctx.font = "20px sans-serif";
-                ctx.fillText("Pressione F5 para reiniciar", canvas.width / 2, canvas.height / 2 + 40);
+                ctx.fillText("Ative o áudio acima para iniciar a exploração.", canvas.width / 2, canvas.height / 2);
                 return;
             }
 
-            // Desenhar jogador (Nave azul)
-            ctx.fillStyle = "#00aaff";
-            ctx.fillRect(player.x, player.y, player.width, player.height);
+            // Desenhar os elementos ocultos no mapa (só ficarão visíveis sob a luz)
+            ctx.fillStyle = "#111115"; // Paredes cinza escuro
+            walls.forEach(wall => ctx.fillRect(wall.x, wall.y, wall.w, wall.h));
 
-            // Desenhar tiros (Lasers vermelhos)
-            ctx.fillStyle = "#ff3333";
-            bullets.forEach(bullet => {
-                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
-            });
+            ctx.fillStyle = "#1a0505"; // Saída sutilmente avermelhada
+            ctx.fillRect(escapePoint.x, escapePoint.y, escapePoint.w, escapePoint.h);
 
-            // Desenhar inimigos (Quadrados roxos)
-            ctx.fillStyle = "#aa00ff";
-            enemies.forEach(enemy => {
-                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
-            });
+            // Desenhar o personagem principal
+            ctx.fillStyle = "#666";
+            ctx.fillRect(player.x, player.y, player.size, player.size);
+
+            // EFEITO DE VISÃO LIMITADA (Lanterna)
+            // Cria um gradiente radial focado no jogador para simular escuridão ao redor
+            ctx.save();
+            let shadowGrad = ctx.createRadialGradient(
+                player.x + player.size / 2, player.y + player.size / 2, 10,  // Círculo interno (claro)
+                player.x + player.size / 2, player.y + player.size / 2, 90   // Círculo externo (escuridão total)
+            );
+            shadowGrad.addColorStop(0, 'rgba(0,0,0,0)');
+            shadowGrad.addColorStop(0.6, 'rgba(0,0,0,0.85)');
+            shadowGrad.addColorStop(1, 'rgba(0,0,0,1)');
+
+            ctx.fillStyle = shadowGrad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
         }
 
-        // Loop principal
         function gameLoop() {
             update();
             draw();
             requestAnimationFrame(gameLoop);
         }
 
-        // Iniciar
-        spawnEnemy();
         gameLoop();
     </script>
 </body>
